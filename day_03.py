@@ -1,41 +1,71 @@
-# The Contractor
+# The Neighbor
 
-# Thanks to your help, Sarah called the investigator that afternoon. The investigator went directly to the cleaners to see if they could get any more information about the unclaimed rug.
+# Sarah and the investigator were very impressed with your data skills, as you were able to figure out the phone number of the contractor. They called up the cleaning contractor straight away and asked about the rug.
 
-# While they were out, Sarah said, “I tried cleaning the rug myself, but there was this snail on it that always seemed to leave a trail of slime behind it. I spent a few hours cleaning it, and the next day the slime trail was back.”
+# “Oh, yeah, I did some special projects for them a few years ago. I remember that rug unfortunately. I managed to clean one section, which revealed a giant spider that startled me whenever I tried to work on it.
 
-# When the investigator returned, they said, “Apparently, this cleaner had a special projects program, where they outsourced challenging cleaning projects to industrious contractors. As they’re right across the street from Noah’s, they usually talked about the project over coffee and bagels at Noah’s before handing off the item to be cleaned. The contractors would pick up the tab and expense it, along with their cleaning supplies.
+# “I already had a fear of spiders before this, but this spider was so realistic that I had a hard time making any more progress. I kept expecting the cleaners would call for the rug, but they never did. I felt so bad about it, I couldn’t face them, and of course they never gave me another project.
 
-# “So this rug was apparently one of those special projects. The claim ticket said ‘2017 JP’. ‘2017’ is the year the item was brought in, and ‘JP’ is the initials of the contractor.
+# “At last I couldn’t deal with the rug taking up my whole bathtub, so I gave it to this guy who lived in my neighborhood. He said that he was naturally intuitive because he was a Cancer born in the year of the Rabbit, so maybe he was able to clean it.
 
-# “But they stopped outsourcing a few years ago, and don’t have contact information for any of these workers anymore.”
+# “I don’t remember his name. Last time I saw him, he was leaving the subway and carrying a bag from Noah’s. I swore I saw a spider on his hat.”
 
-# Sarah first seemed hopeless, and then glanced at the USB drive you had just put back in her hand. She said, “I know it’s a long shot, but is there any chance you could find their phone number?”
+# Can you find the phone number of the person that the contractor gave the rug to?
 
 import polars as pl
+import wikipedia as wiki
+from bs4 import BeautifulSoup
+# hints: Cancer born in the year of the rabbit
+# Cancer timeframe:  June 22 to about July 22
+# Year of the rabbit:
 
 customers = pl.read_csv("usb/noahs-customers.csv")
-orders = pl.read_csv("usb/noahs-orders.csv")
-order_items = pl.read_csv("usb/noahs-orders_items.csv")
-products = pl.read_csv("usb/noahs-products.csv")
+customers = customers.with_columns(pl.col("birthdate").str.to_date("%Y-%m-%d"))
+# customers = customers.select(["customerid", "birthdate", "phone"])
+# get rabbit year ranges
+rabbit_year_html = wiki.page("Rabbit (zodiac)").html().encode("UTF-8")
+table_html = BeautifulSoup(rabbit_year_html, features="lxml").find(
+    'table', attrs={"class": "wikitable"}).find_all('tr')
+
+# https://scrapfly.io/blog/how-to-scrape-tables-with-beautifulsoup/
+header = []
+rows = []
+for i, row in enumerate(table_html):
+    if i == 0:
+        header = [x.text.strip() for x in row.find_all('th')]
+    else:
+        rows.append([x.text.strip() for x in row.find_all('td')])
+
+rabbit_year_ranges = pl.DataFrame(rows, schema=["start_date", "end_date", "not_needed"]).select(
+    pl.exclude("not_needed")).with_columns(pl.all().str.to_date("%d %B %Y"))
+
+# help with the join_as_of here:
+# https://discord.com/channels/908022250106667068/1014967651656814694/1179672540038299678
+rabbit_cust = customers.sort("birthdate").join_asof(
+    rabbit_year_ranges.sort("start_date"),
+    left_on="birthdate", right_on="start_date", strategy="backward").filter(
+    pl.col("birthdate").is_between("start_date", "end_date")).select(
+    pl.exclude("start_date", "end_date"))
+
+# Cancer range June 22 to about July 22
+
+possible_neighbors = rabbit_cust.filter(pl.col("birthdate").dt.month().is_in([6, 7])).with_columns(
+    pl.concat_str([pl.col("birthdate").dt.year(), pl.lit('6'), pl.lit(
+        '22')], separator="-").str.to_date("%Y-%m-%d").alias("cancer_start"),
+    pl.concat_str([pl.col("birthdate").dt.year(), pl.lit('7'), pl.lit(
+        '22')], separator="-").str.to_date("%Y-%m-%d").alias("cancer_end")
+).filter(
+    pl.col("birthdate").is_between("cancer_start", "cancer_end")
+).select(pl.exclude("cancer_start", "cancer_end"))
+
+contractor = pl.read_csv("usb/contractor.csv")
+
+contractor_zip = contractor.select(
+    pl.col("citystatezip").str.extract_all("\d+").explode()).item()
 
 
-jp = customers.with_columns(
-    pl.col("name").str.split(" ").map_elements(
-        lambda x: x[0][0] + x[-1][0]).alias("initials")
-).filter(pl.col("initials") == "JP").select(pl.col("customerid"), pl.col("initials"), pl.col("phone"))
+possible_neighbors = possible_neighbors.with_columns(
+    pl.col("citystatezip").str.extract_all("\d+").explode().alias("zip")
+).filter(pl.col("zip").eq(contractor_zip))
 
-
-jp_orders = orders.join(jp.select(pl.col("customerid")), on="customerid", how="inner").filter(
-    pl.col("ordered").str.to_date("%Y-%m-%d %H:%M:%S").dt.year() == 2017)
-
-rug_cleaner = products.filter(
-    pl.col("desc").str.to_lowercase().str.contains("^rug"))
-
-rug_cleaner_orders_jp = jp_orders.join(order_items, on="orderid", how="inner").join(
-    rug_cleaner, on="sku", how="inner")
-
-contractor = customers.filter(pl.col("customerid") == rug_cleaner_orders_jp.select(
-    pl.col("customerid")).unique())
-
-print(f"the contractor phone number is {contractor['phone'][0]}")
+print(f"The neighbor contact is {possible_neighbors['phone'][0]}")
