@@ -22,4 +22,5 @@ bargain_hunter = total_diff.group_by("customerid").agg(pl.sum("diff").alias("net
     pl.col("net_diff").eq(pl.min("net_diff"))
 ).join(customers.select("customerid", "name", "phone"), on="customerid", how="inner")
 
+bargain_hunter.write_csv("usb/bargain_hunter.csv")
 print(f"The bargain hunter's phone number is {bargain_hunter['phone'].item()}")
