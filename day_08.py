@@ -18,8 +18,7 @@ products = pl.read_csv("usb/noahs-products.csv")
 # get our collector, since only one user has purchased the item.
 
 collectable_set = products.filter(
-    (pl.col("desc").str.contains("Noah")) & (pl.col("wholesale_cost").gt(200))
-)
+    pl.col("desc").str.contains("Noah")).sort("wholesale_cost", descending=True).head(1)
 
 collector = order_items.filter(
     pl.col("sku").eq(collectable_set["sku"])
